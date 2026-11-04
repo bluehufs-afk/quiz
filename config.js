@@ -1,5 +1,5 @@
 
-const firebaseConfig = {
+export const firebaseConfig = {
   apiKey: "AIzaSyAwp2bVv1DzBQ0VQpDckFNfTr34EPks29o",
   authDomain: "kolonquiz.firebaseapp.com",
   projectId: "kolonquiz",
@@ -9,4 +9,4 @@ const firebaseConfig = {
   measurementId: "G-1QVXMWG8ZW"
 };
 
-const ADMIN_UID = "DyzsDw0JC4Ner7MrRvmgP3hIZ6A3";
+export const ADMIN_UID = "DyzsDw0JC4Ner7MrRvmgP3hIZ6A3";
