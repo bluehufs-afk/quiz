@@ -1,0 +1,30 @@
+rules_version = '2';
+service cloud.firestore {
+ match /databases/{database}/documents {
+  function signed() { return request.auth != null; }
+  // 아래 문자열을 config.js의 ADMIN_UID와 동일하게 바꾸세요.
+  function admin() { return signed() && request.auth.uid == 'REPLACE_WITH_ADMIN_UID'; }
+  function game() { return get(/databases/$(database)/documents/games/main).data; }
+  function ownTeam(tid) { return signed() && get(/databases/$(database)/documents/games/main/teams/$(tid)).data.uid == request.auth.uid; }
+  match /games/{gameId} {
+   allow read: if signed();
+   allow create, update, delete: if admin();
+   match /teams/{teamId} { allow read: if signed(); allow write: if admin(); }
+   match /questions/{questionId} { allow read, write: if admin(); }
+   match /publicQuestions/{questionId} { allow read: if signed(); allow write: if admin(); }
+   match /answers/{answerId} {
+    allow read: if admin() || (signed() && (resource.data.uid == request.auth.uid || game().phase == 'closed'));
+    allow create, update: if signed() &&
+      request.resource.data.keys().hasOnly(['teamId','questionId','text','submittedAt','uid']) &&
+      request.resource.data.uid == request.auth.uid &&
+      ownTeam(request.resource.data.teamId) &&
+      answerId == game().current + '_' + request.resource.data.teamId &&
+      request.resource.data.questionId == game().current &&
+      request.resource.data.text is string && request.resource.data.text.size() <= 500 &&
+      game().phase == 'running' && game().paused == false &&
+      request.time < game().deadline;
+    allow delete: if admin();
+   }
+  }
+ }
+}

@@ -1,0 +1,1 @@
+{"hosting":{"public":".","ignore":["firebase.json","firestore.rules","README.md","config.example.js","*.zip",".*"],"rewrites":[{"source":"**","destination":"/index.html"}]},"firestore":{"rules":"firestore.rules"}}
