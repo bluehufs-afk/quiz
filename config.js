@@ -1,6 +1,6 @@
 
 export const firebaseConfig = {
-  apiKey: "AIzaSyAwp2bVv1DzBQ0VQpDckFNfTr34EPks29o",
+  apiKey: "AIzaSyB9r_UCpIItypBbreLNGMURMtW0l-0MsMc",
   authDomain: "kolonquiz.firebaseapp.com",
   projectId: "kolonquiz",
   storageBucket: "kolonquiz.firebasestorage.app",
