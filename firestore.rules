@@ -23,7 +23,7 @@ service cloud.firestore {
       request.resource.data.text is string && request.resource.data.text.size() <= 500 &&
       game().phase == 'running' && game().paused == false &&
       request.time < game().deadline;
-    allow delete: if admin();
+    allow create, update, delete: if admin();
    }
   }
  }
