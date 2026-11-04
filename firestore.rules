@@ -13,7 +13,7 @@ service cloud.firestore {
    match /questions/{questionId} { allow read, write: if admin(); }
    match /publicQuestions/{questionId} { allow read: if signed(); allow write: if admin(); }
    match /answers/{answerId} {
-    allow read: if admin() || (signed() && (resource.data.uid == request.auth.uid || game().phase == 'closed'));
+    allow read: if admin() || (signed() && resource.data.uid == request.auth.uid);
     allow create: if signed() &&
       request.resource.data.keys().hasOnly(['teamId','questionId','text','submittedAt','uid']) &&
       request.resource.data.uid == request.auth.uid &&
