@@ -42,10 +42,10 @@ $('joinBtn').onclick=async()=>{
  }catch(e){console.error(e);text('joinError','등록 실패: '+(e?.message||e))}
  finally{joinBusy=false;$('joinBtn').disabled=false}
 };
-function showJoinQr(){const target=$('qrCode');if(!target)return;text('joinLink',joinUrl);target.innerHTML='';if(window.QRCode)new window.QRCode(target,{text:joinUrl,width:180,height:180,correctLevel:window.QRCode.CorrectLevel.M});else target.textContent='QR코드 로딩 실패 — 아래 주소를 공유하세요.';}
+function showJoinQr(){const target=$('qrCode');if(!target)return;text('joinLink',joinUrl);target.innerHTML='';if(window.QRCode)new window.QRCode(target,{text:joinUrl,width:260,height:260,correctLevel:window.QRCode.CorrectLevel.M});else target.textContent='QR코드 로딩 실패 — 아래 주소를 공유하세요.';}
 showJoinQr();
 async function initializeGame(){const gr=ref('games',gid);if(!(await getDoc(gr)).exists())await setDoc(gr,{phase:'board',current:'',deadline:null,remaining:60,paused:false,showAnswers:false,createdAt:serverTimestamp()});for(let f=0;f<6;f++)for(let l=0;l<3;l++){const id=qid(f,l),qr=ref('games',gid,'questions',id),pr=ref('games',gid,'publicQuestions',id);if(!(await getDoc(qr)).exists())await setDoc(qr,{field:fields[f],level:levels[l],points:points[l],text:'',correct:'',alternatives:[],image:'',done:false});if(!(await getDoc(pr)).exists())await setDoc(pr,{field:fields[f],level:levels[l],points:points[l],text:'',image:'',done:false})}for(let i=1;i<=9;i++){const tr=ref('games',gid,'teams',`team${i}`);if(!(await getDoc(tr)).exists())await setDoc(tr,{name:`${i}팀`,uid:'',score:0})}}
-async function handleAuth(u){unsubs.forEach(fn=>fn());unsubs=[];if(clockTimer)clearInterval(clockTimer);user=u;admin=!!u&&u.uid===ADMIN_UID;game={};teams=[];questions=[];answers=[];loaded={game:false,teams:false,questions:false,answers:false};gradingDraft={};gradingId='';closing=false;visible('login',!u&&new URLSearchParams(location.search).has('admin'));visible('joinPanel',!u&&!new URLSearchParams(location.search).has('admin'));visible('app',!!u);visible('logout',!!u);visible('adminToolbar',admin);visible('adminPanel',false);if($('adminToggle')){$('adminToggle').textContent='⚙ 관리자 설정';$('adminToggle').setAttribute('aria-expanded','false')}visible('adminActions',admin);text('who',u?(admin?'사회자':'참가자'):'');if(!u)return;try{if(admin)await initializeGame()}catch(e){error(e);return}
+async function handleAuth(u){unsubs.forEach(fn=>fn());unsubs=[];if(clockTimer)clearInterval(clockTimer);user=u;admin=!!u&&u.uid===ADMIN_UID;game={};teams=[];questions=[];answers=[];loaded={game:false,teams:false,questions:false,answers:false};gradingDraft={};gradingId='';closing=false;visible('login',!u&&new URLSearchParams(location.search).has('admin'));visible('joinPanel',!u&&!new URLSearchParams(location.search).has('admin'));visible('app',!!u);visible('logout',!!u);visible('adminToolbar',admin);visible('qrOnlyView',false);visible('adminPanel',false);if($('adminToggle')){$('adminToggle').textContent='⚙ 관리자 설정';$('adminToggle').setAttribute('aria-expanded','false')}visible('adminActions',admin);text('who',u?(admin?'사회자':'참가자'):'');if(!u)return;try{if(admin)await initializeGame()}catch(e){error(e);return}
 const listen=(target,kind,transform)=>unsubs.push(onSnapshot(target,s=>{if(!user)return;if(kind==='game')game=s.data()||{};else if(kind==='teams')teams=transform(s);else if(kind==='questions')questions=transform(s);else answers=transform(s);loaded[kind]=true;render()},error));
 const docs=s=>s.docs.map(d=>({id:d.id,...d.data()}));listen(ref('games',gid),'game');listen(collection(db,'games',gid,'teams'),'teams',docs);listen(collection(db,'games',gid,admin?'questions':'publicQuestions'),'questions',docs);const ac=collection(db,'games',gid,'answers');listen(admin?ac:query(ac,where('uid','==',u.uid)),'answers',docs);clockTimer=setInterval(renderClock,200)}
 function renderBoard(){const board=$('board');if(!board)return;let html=fields.map(f=>`<div class="fieldhead">${f}</div>`).join('');for(let l=0;l<3;l++)for(let f=0;f<6;f++){const id=qid(f,l),q=questions.find(x=>x.id===id),done=!!q?.done,disabled=!admin||done||game.phase!=='board'||!loaded.questions;html+=`<button type="button" class="tile ${done?'done':''}" data-q="${id}" ${disabled?'disabled':''}>${done?'✓':`${q?.points??points[l]}점`}<small>${done?'완료':levels[l]}</small></button>`}board.innerHTML=html;board.querySelectorAll('[data-q]').forEach(b=>b.onclick=()=>choose(b.dataset.q));text('counter',`${questions.filter(q=>q.done).length} / 18`)}
@@ -116,3 +116,16 @@ $('resetGame').addEventListener('click',()=>{
     gradingDraft={};gradingId='';notice('전체 초기화 완료: 0/18, 점수 0점, 제출 답안 삭제.');
   });
 });
+
+// QR 전용 화면: 기존 대회 화면과 관리자 설정은 숨기되 진행 상태는 유지합니다.
+let qrMode=false;
+function setQrMode(open){
+  if(!admin)return;
+  qrMode=open;
+  visible('qrOnlyView',open);
+  visible('app',!open);
+  if(open){visible('adminPanel',false);$('adminToggle').textContent='⚙ 관리자 설정';$('adminToggle').setAttribute('aria-expanded','false');showJoinQr();}
+  $('qrToggle').textContent=open?'▦ QR 표시 중':'▦ 참가자 QR';
+}
+$('qrToggle').onclick=()=>setQrMode(!qrMode);
+$('qrBack').onclick=()=>setQrMode(false);
