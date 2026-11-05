@@ -58,7 +58,25 @@ function render(){if(!user)return;
  renderBoard();renderRanking();syncTimeInputs();const q=currentQ(),isBoard=game.phase==='board'||!q,closed=game.phase==='closed',running=game.phase==='running',ready=game.phase==='ready';// Explicit panel switching, independent of CSS :has()
 visible('boardPanel',isBoard);visible('active',!isBoard);if(isBoard)return;text('questionMeta',`${q.field} · ${q.level} · ${q.points}점`);text('questionText',q.text||'(문제 미등록)');$('questionImage').innerHTML=q.image?`<img src="${esc(q.image)}" alt="문제 이미지">`:'';text('submitCount',`답안 제출 ${teams.filter(t=>answerFor(t.id)).length} / 9팀`);const submittedTeams=$('submittedTeams');if(submittedTeams){submittedTeams.innerHTML=admin&&running?sortedTeams().map(t=>{const sent=!!answerFor(t.id);return `<span class="team-chip ${sent?'sent':''}">${sent?'✓ ':''}${esc(t.name)}</span>`}).join(''):'';}visible('teamAnswer',!admin&&!!myTeam()&&running);$('submitBtn').disabled=!running||game.paused||remaining()<=0||submitting;if(myTeam()&&document.activeElement!==$('answerInput'))$('answerInput').value=answerFor(myTeam().id)?.text||'';visible('reveal',closed&&admin);if(closed&&admin)text('correctText',q.correct||'');visible('questionText',!closed);visible('questionImage',!closed);visible('clock',!closed);visible('submitCount',!closed);visible('submittedTeams',!closed&&admin);visible('controlButtons',admin&&!closed);visible('grading',admin&&closed);if(admin){$('startBtn').disabled=!ready||!q.text||!q.correct;$('startBtn').textContent=`${durationFor(q)}초 시작`;$('closeBtn').disabled=!running;$('pauseBtn').disabled=!running||!!game.paused;$('resumeBtn').disabled=!running||!game.paused;text('adminHint',ready?'문제를 확인한 후 60초 시작을 누르세요.':running?'시간이 끝나면 채점 화면으로 전환됩니다.':closed?'팀별 채점 후 점수 반영 및 다음 문제를 누르세요.':'');if(closed)renderGrades(q)}renderClock()}
 function renderClock(){if(!user)return;const r=remaining();text('clock',`${String(Math.floor(r/60)).padStart(2,'0')}:${String(r%60).padStart(2,'0')}`);if(admin&&game.phase==='running'&&!game.paused&&r===0&&!closing){closing=true;closeQuestion().finally(()=>{closing=false})}}
-async function choose(id){if(!admin||game.phase!=='board')return;const q=questions.find(x=>x.id===id);if(!q||q.done)return;try{await updateDoc(ref('games',gid),{current:id,phase:'ready',deadline:null,remaining:durationFor(q),paused:false,revealedCorrect:'',publishedAnswers:{}})}catch(e){error(e)}}
+let choosing=false;
+async function choose(id){
+  if(!admin||game.phase!=='board'||choosing)return;
+  const q=questions.find(x=>x.id===id);
+  if(!q||q.done)return;
+  if(!q.text?.trim()||!q.correct?.trim()){
+    notice('문제와 정답을 먼저 등록해야 출제할 수 있습니다.');return;
+  }
+  choosing=true;
+  const duration=durationFor(q);
+  try{
+    await runTransaction(db,async tx=>{
+      const gr=ref('games',gid),gs=await tx.get(gr);
+      if(gs.data()?.phase!=='board')throw Error('다른 문제가 이미 진행 중입니다.');
+      tx.update(gr,{current:id,phase:'running',deadline:new Date(Date.now()+duration*1000),remaining:duration,paused:false,revealedCorrect:'',publishedAnswers:{}});
+    });
+    notice(`${q.field} · ${q.level} 문제 시작 (${duration}초)`);
+  }catch(e){error(e)}finally{choosing=false}
+}
 $('startBtn').onclick=async()=>{if(!admin||game.phase!=='ready')return;const q=currentQ();if(!q?.text||!q?.correct){notice('문제와 정답을 먼저 등록하세요.');return}const duration=durationFor(q);try{await updateDoc(ref('games',gid),{phase:'running',deadline:new Date(Date.now()+duration*1000),remaining:duration,paused:false})}catch(e){error(e)}};
 async function closeQuestion(){if(!admin||game.phase!=='running')return;try{await updateDoc(ref('games',gid),{phase:'closed',remaining:0,paused:false,revealedCorrect:currentQ()?.correct||'',publishedAnswers:{}})}catch(e){error(e)}}
 $('closeBtn').onclick=closeQuestion;
@@ -128,6 +146,38 @@ $('resetGame').addEventListener('click',()=>{
     for(let i=0;i<ops.length;i+=400){const batch=writeBatch(db);ops.slice(i,i+400).forEach(op=>op(batch));await batch.commit();}
     gradingDraft={};gradingId='';notice('전체 초기화 완료: 0/18, 점수 0점, 제출 답안 삭제.');
   });
+});
+
+// 테스트 참가팀 전체 해제: 팀명 예약 문서까지 함께 제거해야 동일 이름 재등록이 가능합니다.
+$('resetParticipants').addEventListener('click',()=>{
+  actionDialog('참가팀 등록 전체 초기화',
+    '테스트용으로 등록된 9개 팀을 모두 해제합니다.\n\n• 팀 이름: 1팀~9팀으로 복원\n• 등록된 참가자 UID와 팀 이름 예약: 삭제\n• 점수·제출 답안·완료 기록: 모두 초기화\n• 문제 내용·정답·시간 설정: 유지\n\n실제 대회 시작 전에만 실행하세요.',
+    '참가팀 등록 초기화',async()=>{
+      const [namesSnap,answersSnap]=await Promise.all([
+        getDocs(collection(db,'games',gid,'teamNames')),
+        getDocs(collection(db,'games',gid,'answers'))
+      ]);
+      const ops=[];
+      namesSnap.docs.forEach(d=>ops.push(b=>b.delete(d.ref)));
+      answersSnap.docs.forEach(d=>ops.push(b=>b.delete(d.ref)));
+      for(let i=1;i<=9;i++){
+        const tr=ref('games',gid,'teams',`team${i}`);
+        ops.push(b=>b.set(tr,{name:`${i}팀`,uid:'',nameKey:'',score:0},{merge:true}));
+      }
+      for(let f=0;f<6;f++)for(let l=0;l<3;l++){
+        const id=qid(f,l);
+        ops.push(b=>b.update(ref('games',gid,'questions',id),{done:false,grades:{}}));
+        ops.push(b=>b.update(ref('games',gid,'publicQuestions',id),{done:false}));
+      }
+      ops.push(b=>b.update(ref('games',gid),boardState()));
+      for(let i=0;i<ops.length;i+=400){
+        const batch=writeBatch(db);
+        ops.slice(i,i+400).forEach(op=>op(batch));
+        await batch.commit();
+      }
+      gradingDraft={};gradingId='';
+      notice('참가팀 등록 초기화 완료. 9개 팀을 새로 등록할 수 있습니다.');
+    });
 });
 
 // QR 전용 화면: 기존 대회 화면과 관리자 설정은 숨기되 진행 상태는 유지합니다.
