@@ -1,7 +1,7 @@
 import {firebaseConfig,ADMIN_UID} from './config.js';
 import {initializeApp} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
 import {getAuth,onAuthStateChanged,signInWithEmailAndPassword,signOut} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
-import {getFirestore,doc,collection,query,where,onSnapshot,getDoc,setDoc,updateDoc,runTransaction,serverTimestamp} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
+import {getFirestore,doc,collection,query,where,onSnapshot,getDoc,setDoc,updateDoc,runTransaction,serverTimestamp,writeBatch,getDocs} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 const $=id=>document.getElementById(id),fields=['경지','인력','노경','안전','환경','WCD'],levels=['하','중','상'],points=[50,100,150],gid='main';
 const qid=(f,l)=>`${f}-${l}`,esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let db,auth,user=null,admin=false,game={},teams=[],questions=[],answers=[],unsubs=[],clockTimer=null,closing=false,finalizing=false,submitting=false,gradingDraft={},gradingId='',loaded={game:false,teams:false,questions:false,answers:false};
@@ -36,3 +36,49 @@ $('exportBtn').onclick=()=>{if(!admin)return;const rows=[['분야','난이도','
 
 // 관리자 설정은 필요할 때만 펼칩니다.
 $('adminToggle').onclick=()=>{if(!admin)return;const panel=$('adminPanel'),opening=panel.classList.contains('hidden');visible('adminPanel',opening);$('adminToggle').textContent=opening?'⚙ 설정 닫기':'⚙ 관리자 설정';$('adminToggle').setAttribute('aria-expanded',String(opening));if(opening)panel.scrollIntoView({behavior:'smooth',block:'start'});};
+
+// 브라우저 기본 confirm 대신 화면 내 확인창을 사용합니다.
+function actionDialog(title,message,buttonText,task){
+  if(!admin){notice('관리자 계정으로 로그인해야 합니다.');return;}
+  const dlg=$('actionDialog'),ok=$('dialogConfirm'),cancel=$('dialogCancel');
+  text('dialogTitle',title);text('dialogMessage',message);text('dialogStatus','');
+  ok.textContent=buttonText;ok.disabled=false;cancel.disabled=false;
+  visible('actionDialog',true);
+  const close=()=>{visible('actionDialog',false);ok.onclick=null;cancel.onclick=null;};
+  cancel.onclick=close;
+  ok.onclick=async()=>{
+    ok.disabled=true;cancel.disabled=true;text('dialogStatus','Firebase에 저장하는 중입니다...');
+    try{await task();close();}
+    catch(e){console.error('관리자 작업 실패',e);text('dialogStatus','실패: '+(e?.message||String(e)));notice('오류: '+(e?.message||String(e)));ok.disabled=false;cancel.disabled=false;}
+  };
+}
+function boardState(){return {phase:'board',current:'',deadline:null,remaining:60,paused:false,revealedCorrect:'',publishedAnswers:{}};}
+$('backToBoard').addEventListener('click',()=>{
+  actionDialog('문제 선택판으로 복귀','현재 문제를 중단하고 선택판으로 돌아갑니다.\n기존 팀 점수와 완료된 문제는 유지됩니다.','선택판으로 돌아가기',async()=>{
+    // 진행 중단한 문제의 제출 답안을 삭제해야 같은 문제를 재출제할 수 있습니다.
+    const active=game.current;
+    if(active){
+      const snap=await getDocs(collection(db,'games',gid,'answers'));
+      const old=snap.docs.filter(d=>d.data().questionId===active);
+      if(old.length){const b=writeBatch(db);old.forEach(d=>b.delete(d.ref));await b.commit();}
+    }
+    await updateDoc(ref('games',gid),boardState());
+    gradingDraft={};gradingId='';notice('문제 선택판으로 돌아왔습니다. 점수는 유지됩니다.');
+  });
+});
+$('resetGame').addEventListener('click',()=>{
+  actionDialog('대회 전체 초기화','테스트 진행 기록을 초기화합니다.\n\n• 팀 점수: 모두 0점\n• 18문제 완료 기록: 모두 해제\n• 제출 답안: 모두 삭제\n\n문제 내용·정답·팀 이름은 그대로 유지됩니다.\n이 작업은 되돌릴 수 없습니다.','전체 초기화 실행',async()=>{
+    const snap=await getDocs(collection(db,'games',gid,'answers'));
+    // Firestore 배치 최대 500회 제한을 피하기 위해 분할 처리
+    const ops=[];
+    snap.docs.forEach(d=>ops.push(b=>b.delete(d.ref)));
+    for(const t of teams)ops.push(b=>b.update(ref('games',gid,'teams',t.id),{score:0}));
+    for(const q of questions){
+      ops.push(b=>b.update(ref('games',gid,'questions',q.id),{done:false,grades:{}}));
+      ops.push(b=>b.update(ref('games',gid,'publicQuestions',q.id),{done:false}));
+    }
+    ops.push(b=>b.update(ref('games',gid),boardState()));
+    for(let i=0;i<ops.length;i+=400){const batch=writeBatch(db);ops.slice(i,i+400).forEach(op=>op(batch));await batch.commit();}
+    gradingDraft={};gradingId='';notice('전체 초기화 완료: 0/18, 점수 0점, 제출 답안 삭제.');
+  });
+});
