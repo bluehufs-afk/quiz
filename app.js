@@ -58,7 +58,25 @@ async function initializeGame(){const gr=ref('games',gid);if(!(await getDoc(gr))
 async function handleAuth(u){unsubs.forEach(fn=>fn());unsubs=[];if(clockTimer)clearInterval(clockTimer);user=u;admin=!!u&&u.uid===ADMIN_UID;game={};teams=[];questions=[];answers=[];loaded={game:false,teams:false,questions:false,answers:false};gradingDraft={};gradingId='';closing=false;visible('login',!u&&new URLSearchParams(location.search).has('admin'));visible('joinPanel',!u&&!new URLSearchParams(location.search).has('admin'));visible('app',!!u);visible('logout',!!u);visible('adminToolbar',admin);visible('qrOnlyView',false);visible('adminPanel',false);if($('adminToggle')){$('adminToggle').textContent='⚙ 관리자 설정';$('adminToggle').setAttribute('aria-expanded','false')}visible('adminActions',admin);text('who',u?(admin?'사회자':'참가자'):'');if(!u)return;try{if(admin)await initializeGame()}catch(e){error(e);return}
 const listen=(target,kind,transform)=>unsubs.push(onSnapshot(target,s=>{if(!user)return;if(kind==='game')game=s.data()||{};else if(kind==='teams')teams=transform(s);else if(kind==='questions')questions=transform(s);else answers=transform(s);loaded[kind]=true;render()},error));
 const docs=s=>s.docs.map(d=>({id:d.id,...d.data()}));listen(ref('games',gid),'game');listen(collection(db,'games',gid,'teams'),'teams',docs);listen(collection(db,'games',gid,admin?'questions':'publicQuestions'),'questions',docs);const ac=collection(db,'games',gid,'answers');listen(admin?ac:query(ac,where('uid','==',u.uid)),'answers',docs);clockTimer=setInterval(renderClock,200)}
-function renderBoard(){const board=$('board');if(!board)return;const cs=counts();let html=fields.map((f,i)=>`<div class="fieldhead">${f}<small style="display:block;font-size:13px">${activeQuestions().filter(q=>q.field===f).length}문제</small></div>`).join('');for(let l=0;l<Math.max(...cs);l++)for(let f=0;f<6;f++){if(l>=cs[f]){html+='<div></div>';continue}const id=qid(f,l),q=questions.find(x=>x.id===id);if(q?.level==='없음'){html+='<div></div>';continue}const done=!!q?.done,disabled=!admin||done||game.phase!=='board'||!loaded.questions||!q;const level=q?.level||levels[l%3];html+=`<button type="button" class="tile ${done?'done':''}" data-q="${id}" ${disabled?'disabled':''}>${done?'✓':`${q?.points??points[l%3]}점`}<small>${done?'완료':level} · ${l+1}번</small></button>`}board.innerHTML=html;board.querySelectorAll('[data-q]').forEach(b=>b.onclick=()=>choose(b.dataset.q));text('counter',`${activeQuestions().filter(q=>q.done).length} / ${totalQuestions()}`)}
+function renderBoard(){
+  const board=$('board');if(!board)return;
+  const cs=counts(),visibleByField=fields.map((f,i)=>questions
+    .filter(q=>q.field===f&&Number(q.id.split('-')[1])<cs[i]&&q.level!=='없음')
+    .sort((a,b)=>(levels.indexOf(a.level)<0?3:levels.indexOf(a.level))-(levels.indexOf(b.level)<0?3:levels.indexOf(b.level))||
+      Number(a.id.split('-')[1])-Number(b.id.split('-')[1])));
+  let html=fields.map((f,i)=>`<div class="fieldhead">${f}<small style="display:block;font-size:13px">${visibleByField[i].length}문제</small></div>`).join('');
+  const maxRows=Math.max(0,...visibleByField.map(qs=>qs.length));
+  for(let row=0;row<maxRows;row++)for(let f=0;f<6;f++){
+    const q=visibleByField[f][row];if(!q){html+='<div></div>';continue}
+    const done=!!q.done,disabled=!admin||done||game.phase!=='board'||!loaded.questions;
+    const level=levels.includes(q.level)?q.level:'하',index=Number(q.id.split('-')[1])+1;
+    html+=`<button type="button" class="tile tile-${level==='하'?'low':level==='중'?'mid':'high'} ${done?'done':''}" data-q="${esc(q.id)}" ${disabled?'disabled':''}>${done?'✓':`${q.points??points[levels.indexOf(level)]}점`}<small>${done?'완료':level} · ${index}번</small></button>`;
+  }
+  board.innerHTML=html;
+  board.querySelectorAll('[data-q]').forEach(b=>b.onclick=()=>choose(b.dataset.q));
+  text('counter',`${activeQuestions().filter(q=>q.done).length} / ${totalQuestions()}`);
+}
+
 function renderQrRegistration(){
  const count=$('qrRegistrationCount'),names=$('qrRegistrationNames');
  if(!count||!names)return;
